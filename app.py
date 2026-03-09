@@ -1,4 +1,6 @@
 import streamlit as st
+import numpy as np
+import matplotlib.pyplot as plt
 
 
 # -----------------------------
@@ -50,6 +52,68 @@ def risk_label(risk_index: float) -> str:
 
 
 # -----------------------------
+# Графики
+# -----------------------------
+def plot_risk_scale(risk_value: float):
+    """Шкала риска с отметкой положения пациента."""
+    fig, ax = plt.subplots(figsize=(8, 1.8))
+
+    ax.axvspan(0.0, 0.3, alpha=0.3)
+    ax.axvspan(0.3, 0.6, alpha=0.3)
+    ax.axvspan(0.6, 1.0, alpha=0.3)
+
+    ax.axvline(risk_value, linestyle="--", linewidth=3)
+
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    ax.set_yticks([])
+    ax.set_xlabel("Индекс риска")
+    ax.set_title("Шкала риска глаукомы")
+
+    ax.text(0.15, 0.75, "Низкий", ha="center", va="center")
+    ax.text(0.45, 0.75, "Умеренный", ha="center", va="center")
+    ax.text(0.80, 0.75, "Высокий", ha="center", va="center")
+
+    return fig
+
+
+def plot_risk_distribution(risk_value: float):
+    """Условное нормальное распределение индекса риска и положение пациента."""
+    x = np.linspace(0, 1, 500)
+
+    # Демонстрационные параметры распределения
+    mu = 0.45
+    sigma = 0.18
+
+    y = (1 / (sigma * np.sqrt(2 * np.pi))) * np.exp(-0.5 * ((x - mu) / sigma) ** 2)
+
+    fig, ax = plt.subplots(figsize=(8, 4))
+    ax.plot(x, y, linewidth=2)
+    ax.axvline(risk_value, linestyle="--", linewidth=2)
+
+    ax.set_title("Положение пациента на распределении индекса риска")
+    ax.set_xlabel("Индекс риска")
+    ax.set_ylabel("Плотность распределения")
+    ax.set_xlim(0, 1)
+
+    return fig
+
+
+def plot_factor_contributions(contributions: dict, title: str):
+    """Столбчатая диаграмма вкладов факторов в итоговый риск."""
+    labels = list(contributions.keys())
+    values = list(contributions.values())
+
+    fig, ax = plt.subplots(figsize=(8, 4))
+    ax.bar(labels, values)
+    ax.set_ylim(0, max(0.05, max(values) * 1.2))
+    ax.set_ylabel("Вклад в индекс риска")
+    ax.set_title(title)
+
+    return fig
+
+
+# -----------------------------
 # Расчёт моделей
 # -----------------------------
 def calculate_base_model(iop: float, cct: float, age: float) -> dict:
@@ -70,7 +134,11 @@ def calculate_base_model(iop: float, cct: float, age: float) -> dict:
     cct_norm = normalize_inverse(cct, 480, 620)
     age_norm = normalize_direct(age, 20, 80)
 
-    risk = 0.5 * iop_norm + 0.25 * cct_norm + 0.25 * age_norm
+    contrib_iop = 0.5 * iop_norm
+    contrib_cct = 0.25 * cct_norm
+    contrib_age = 0.25 * age_norm
+
+    risk = contrib_iop + contrib_cct + contrib_age
     risk = clamp(risk)
 
     return {
@@ -80,6 +148,11 @@ def calculate_base_model(iop: float, cct: float, age: float) -> dict:
         "age_norm": round(age_norm, 3),
         "risk": round(risk, 3),
         "label": risk_label(risk),
+        "contributions": {
+            "ВГД": contrib_iop,
+            "CCT": contrib_cct,
+            "Возраст": contrib_age,
+        },
     }
 
 
@@ -102,12 +175,12 @@ def calculate_extended_model(iop: float, cct: float, age: float, cdr: float) -> 
     age_norm = normalize_direct(age, 20, 80)
     cdr_norm = normalize_direct(cdr, 0.0, 1.0)
 
-    risk = (
-        0.4 * iop_norm
-        + 0.2 * cct_norm
-        + 0.2 * age_norm
-        + 0.2 * cdr_norm
-    )
+    contrib_iop = 0.4 * iop_norm
+    contrib_cct = 0.2 * cct_norm
+    contrib_age = 0.2 * age_norm
+    contrib_cdr = 0.2 * cdr_norm
+
+    risk = contrib_iop + contrib_cct + contrib_age + contrib_cdr
     risk = clamp(risk)
 
     return {
@@ -118,6 +191,12 @@ def calculate_extended_model(iop: float, cct: float, age: float, cdr: float) -> 
         "cdr_norm": round(cdr_norm, 3),
         "risk": round(risk, 3),
         "label": risk_label(risk),
+        "contributions": {
+            "ВГД": contrib_iop,
+            "CCT": contrib_cct,
+            "Возраст": contrib_age,
+            "CDR": contrib_cdr,
+        },
     }
 
 
@@ -200,6 +279,19 @@ if st.button("Рассчитать риск"):
         st.write(f"Нормализованная CCT: **{base_result['cct_norm']}**")
         st.write(f"Нормализованный возраст: **{base_result['age_norm']}**")
 
+    st.markdown("### Визуализация базовой модели")
+    fig_scale_base = plot_risk_scale(base_result["risk"])
+    st.pyplot(fig_scale_base)
+
+    fig_dist_base = plot_risk_distribution(base_result["risk"])
+    st.pyplot(fig_dist_base)
+
+    fig_contrib_base = plot_factor_contributions(
+        base_result["contributions"],
+        "Вклад факторов в базовый индекс риска",
+    )
+    st.pyplot(fig_contrib_base)
+
     if use_cdr and cdr is not None:
         ext_result = calculate_extended_model(iop, cct, age, cdr)
 
@@ -216,7 +308,24 @@ if st.button("Рассчитать риск"):
             st.write(f"Нормализованный возраст: **{ext_result['age_norm']}**")
             st.write(f"Нормализованный CDR: **{ext_result['cdr_norm']}**")
 
+        st.markdown("### Визуализация расширенной модели")
+        fig_scale_ext = plot_risk_scale(ext_result["risk"])
+        st.pyplot(fig_scale_ext)
+
+        fig_dist_ext = plot_risk_distribution(ext_result["risk"])
+        st.pyplot(fig_dist_ext)
+
+        fig_contrib_ext = plot_factor_contributions(
+            ext_result["contributions"],
+            "Вклад факторов в расширенный индекс риска",
+        )
+        st.pyplot(fig_contrib_ext)
+
     st.markdown("---")
     st.caption(
         "Шкала интерпретации: 0–0.3 — низкий риск; 0.3–0.6 — умеренный риск; выше 0.6 — высокий риск."
+    )
+    st.caption(
+        "График распределения является демонстрационным и используется для визуализации "
+        "положения рассчитанного индекса риска относительно условной выборки."
     )
